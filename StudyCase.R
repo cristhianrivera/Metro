@@ -34,19 +34,20 @@ library(shiny)
 
 
 
-setwd('C:/Users/a688291/Downloads/case_study/')
-path = 'C:/Users/a688291/Downloads/case_study/'
-
+setwd('/Users/Cristhian/Documents/Metro/case_study/')
+path = '/Users/Cristhian/Documents/Metro/case_study/'
 
 data_metro <- read.csv(file= paste(path,"data.csv", sep = ""),
                          header = TRUE, 
                          sep=",")
 
 distinct(data_metro,calendar_date)
-data_metro$Date <- lubridate::dmy(data_metro$calendar_date)
+data_metro$calendar_date <- lubridate::mdy(data_metro$calendar_date)
 
 
 plotgg <- function(ser1, ser2){
+  n1 = names(ser1)
+  n2 = names(ser1)
   plotfun <- as.data.frame(
     cbind(ts = seq(1, length(ser1), by =1 ),
           ser1,
@@ -210,42 +211,61 @@ data_metro_eda <- data_metro %>%
             revenue = sum(revenue),
             cost = sum(cost),
             stock_level = sum(stock_level),
-            retail_price = sum(retail_price))%>%
+            retail_price = sum(retail_price),
+            mpdm1 = sum(mpdm1),
+            cdm1  = sum(cdm1) )%>%
   filter(product_id==13701) %>%
-  arrange(lubridate::dmy(calendar_date))
+  arrange(as.Date(calendar_date))
+
+View(data_metro_eda)
 
 data_metro_eda <- data_metro_eda %>%
-  mutate(stock_levelD = dplyr::lag(stock_level,default=0))
+  ungroup() %>%
+  mutate(stock_levelD = dplyr::lead(stock_level,
+                                    order_by = as.Date(calendar_date), 
+                                    n=7,
+                                    defaul = stock_level )
+         )
 
-dplyr::lag()
 
-
-plotgg(log(data_metro_eda$volume_sold+1), log(data_metro_eda$retail_price+1) )
+plotgg(log(data_metro_eda$volume_sold+1), log(data_metro_eda$stock_level+1) )
 TSAnalysis(log(data_metro_eda$retail_price+1))
 
 ser.model      <- data_metro_eda$volume_sold
 ser.retprice   <- data_metro_eda$retail_price
-ser.stock      <- data_metro_eda$stock_level
+ser.stock      <- data_metro_eda$stock_levelD
+ser.maxprice   <- data_metro_eda$mpdm1
+ser.cost       <- data_metro_eda$cdm1
+
+exo.vars <- data.frame(
+  cbind(price    = log(ser.retprice+1),
+        stock    = log(ser.stock+1),
+        maxprice = log(ser.maxprice+1),
+        cost     = log(ser.cost +1 ) )
+  )
 
 
-
-
-model.exo <- forecast::Arima(y = log(ser.model+1),
+model.exo <- forecast::Arima(
+                y = log(ser.model+1),
                 order = c(2,0,1),
-                xreg = data.frame(log(ser.exo+1))
-                )
+                xreg = exo.vars,
+                include.drift = TRUE)
 
-#TSAnalysis(model.exo$residuals)
+model.exo
+forecast::Acf(model.exo$residuals, lag.max = 20)
+forecast::Pacf(model.exo$residuals, lag.max = 20)
+
 summary(model.exo$residuals)
 plot(model.exo$residuals)
 
-ser.for <- forecast::forecast(model.exo, xreg = data.frame(log(ser.exo+1)), h =31)
+ser.for <- forecast::forecast(model.exo, xreg = exo.vars, h =31)
 ori = exp(as.double(ser.for$x))-1
 fore = exp(as.double(ser.for$fitted))-1
 plotgg(ori,fore)
 
-forecast::accuracy(ser.for)
-mape(fore,ori)
+mape(ori+1,fore+1)
+
+
 
 #################Some charts##########################
 
