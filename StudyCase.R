@@ -13,8 +13,6 @@ library(forecast)
 library(xts)
 library(numbers)
 library(shiny)
-library(keras)
-
 
 
 # What are you going to do?
@@ -27,6 +25,7 @@ library(keras)
 #     a) models for every product_id
 #   3. ARIMAX models 
 #     a) models for every product_id
+#   4. Linear regression model
 #   4. LSTM model
 #     a) unique model with one-hot for product_id
 #   ----------------just if there is time-------------
@@ -45,9 +44,25 @@ data_metro <- read.csv(file= paste(path,"data.csv", sep = ""),
 
 distinct(data_metro,calendar_date)
 data_metro$Date <- lubridate::dmy(data_metro$calendar_date)
-lubridate::dmy
-distinct(data_metro,calendar_date)
 
+
+plotgg <- function(ser1, ser2){
+  plotfun <- as.data.frame(
+    cbind(ts = seq(1, length(ser1), by =1 ),
+          ser1,
+          ser2))
+  plotfun <- reshape2::melt(plotfun, id="ts")
+  p <- ggplot(data = plotfun,
+              aes(x = ts, 
+                  y = value, 
+                  colour = variable )) +
+    geom_line()+
+    xlab('Time')+
+    ylab('Value')+
+    theme_minimal()
+  
+  ggplotly(p)
+}
 ################EDA################
 library(dplyr)
 library(reshape)
@@ -123,8 +138,71 @@ p<- ggplot(plotfun)+
   xlab("date")
 ggplotly(p)  
 
-
+#########################################################################
+###Simple model by product_id 
 ###volume old per product id seems to be very different
+#########################################################################
+TSAnalysis <- function(ts, lags=20){
+  ts <- na.omit(ts)
+  win.graph(width=4.875,height=3,pointsize=8)
+  forecast::Acf(ts,lags, main = "ACF", xlab = "")
+  win.graph(width=4.875,height=3,pointsize=8)
+  forecast::Pacf(ts,lags, main = "PACF")
+}
+
+# product_id
+# 1      13701
+# 2      26104
+# 3     158105
+# 4     158737
+
+
+
+
+################### 1 #################################
+data_metro_eda <- data_metro %>%
+  group_by(calendar_date, product_id) %>%
+  summarise(volume_sold = sum(volume_sold),
+            revenue = sum(revenue),
+            cost = sum(cost),
+            stock_level = sum(stock_level),
+            retail_price = sum(retail_price))%>%
+  filter(product_id==13701) %>%
+  arrange(lubridate::dmy(calendar_date))
+
+p <- ggplot(data_metro_eda)+
+  geom_line(aes(x = lubridate::dmy(calendar_date), y = volume_sold), group=1)+
+  theme_minimal()
+ggplotly(p)
+
+
+myts <- ts(data_metro_eda$volume_sold) 
+TSAnalysis(myts)
+
+ser.model <- ts(data_metro_eda$volume_sold) 
+#manual Arima choice
+modelBaseLine <- forecast::Arima(log(ser.model+1), 
+                order = c(1,1,1))
+#auto Arima
+modelBaseLine <- forecast::auto.arima(log(ser.model+1))
+
+TSAnalysis(modelBaseLine$residuals)
+summary(modelBaseLine$residuals)
+plot(modelBaseLine$residuals)
+
+
+ser.for <- forecast::forecast(modelBaseLine, h =31)
+ori = exp(as.double(ser.for$x))-1
+fore = exp(as.double(ser.for$fitted))-1
+
+plotgg(ori,fore)
+forecast::accuracy(ser.for)
+mape(fore,ori)
+#########################################################################
+#########################################################################
+
+
+################### 2 #################################
 
 data_metro_eda <- data_metro %>%
   group_by(calendar_date, product_id) %>%
@@ -136,21 +214,39 @@ data_metro_eda <- data_metro %>%
   filter(product_id==13701) %>%
   arrange(lubridate::dmy(calendar_date))
 
-myts <- ts(data_metro_eda$volume_sold, start=c(2017, 1),frequency=365) 
+data_metro_eda <- data_metro_eda %>%
+  mutate(stock_levelD = dplyr::lag(stock_level,default=0))
 
-win.graph(width=4.875,height=3,pointsize=8)
-acf(myts,ci.type='ma', xaxp=c(0,20,10))
-win.graph(width=4.875,height=3,pointsize=8)
-pacf(myts)
+dplyr::lag()
 
 
+plotgg(log(data_metro_eda$volume_sold+1), log(data_metro_eda$retail_price+1) )
+TSAnalysis(log(data_metro_eda$retail_price+1))
 
-plot(myts)
-# product_id
-# 1      13701
-# 2      26104
-# 3     158105
-# 4     158737
+ser.model      <- data_metro_eda$volume_sold
+ser.retprice   <- data_metro_eda$retail_price
+ser.stock      <- data_metro_eda$stock_level
+
+
+
+
+model.exo <- forecast::Arima(y = log(ser.model+1),
+                order = c(2,0,1),
+                xreg = data.frame(log(ser.exo+1))
+                )
+
+#TSAnalysis(model.exo$residuals)
+summary(model.exo$residuals)
+plot(model.exo$residuals)
+
+ser.for <- forecast::forecast(model.exo, xreg = data.frame(log(ser.exo+1)), h =31)
+ori = exp(as.double(ser.for$x))-1
+fore = exp(as.double(ser.for$fitted))-1
+plotgg(ori,fore)
+
+forecast::accuracy(ser.for)
+mape(fore,ori)
+
 #################Some charts##########################
 
 
@@ -168,7 +264,7 @@ data_metro_plot <- data.frame(data_metro_plot)
 plotfun <- melt(data_metro_plot, id="calendar_date")
 
 p <- ggplot(data = plotfun,
-            aes(x = as.Date(calendar_date,"%m/%d/%Y"), 
+            aes(x = as.Date(calendar_date,"%d/%m/%Y"), 
                 y = value, 
                 colour = variable)) +
   geom_line()+
