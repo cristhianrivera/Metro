@@ -53,7 +53,7 @@ plotgg <- function(ser1, ser2){
           ser1,
           ser2))
   plotfun <- reshape2::melt(plotfun, id="ts")
-  p <- ggplot(data = plotfun,
+  p <- ggplot2::ggplot(data = plotfun,
               aes(x = ts, 
                   y = value, 
                   colour = variable )) +
@@ -62,7 +62,7 @@ plotgg <- function(ser1, ser2){
     ylab('Value')+
     theme_minimal()
   
-  ggplotly(p)
+  plotly::ggplotly(p)
 }
 ################EDA################
 library(dplyr)
@@ -183,16 +183,17 @@ TSAnalysis(myts)
 ser.model <- ts(data_metro_eda$volume_sold) 
 #manual Arima choice
 modelBaseLine <- forecast::Arima(log(ser.model+1), 
-                order = c(1,1,1))
+                order = c(1,1,1),
+                xreg =exo.vars)
 #auto Arima
-modelBaseLine <- forecast::auto.arima(log(ser.model+1))
+modelBaseLine <- forecast::auto.arima(log(ser.model+1),xreg =exo.vars)
 
 TSAnalysis(modelBaseLine$residuals)
 summary(modelBaseLine$residuals)
 plot(modelBaseLine$residuals)
 
 
-ser.for <- forecast::forecast(modelBaseLine, h =31)
+ser.for <- forecast::forecast(modelBaseLine, xreg = exo.vars,h =31)
 ori = exp(as.double(ser.for$x))-1
 fore = exp(as.double(ser.for$fitted))-1
 
@@ -246,8 +247,8 @@ exo.vars <- data.frame(
 
 
 model.exo <- forecast::Arima(
-                y = log(ser.model+1),
-                order = c(2,0,1),
+                log(ser.model+1),
+                order = c(0,0,0),
                 xreg = exo.vars,
                 include.drift = TRUE)
 
