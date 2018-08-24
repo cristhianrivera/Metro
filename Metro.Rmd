@@ -1,0 +1,238 @@
+---
+title: "Metro - Case Study"
+author: "Cristhian Jim??nez"
+date: "8/24/2018"
+output: ioslides_presentation
+incremental: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(rpivotTable)
+library(tibble)
+library(chron)
+library(lubridate)
+library(zoo)
+library(dplyr)
+library(reshape)
+library(reshape2)
+library(plotly)
+library(stringr)
+library(forecast)
+library(xts)
+library(numbers)
+library(shiny)
+library(knitr)
+library(kableExtra)
+
+TSAnalysis <- function(ts, lags=20){
+  ts <- na.omit(ts)
+  par(mfrow=c(2,1))
+  #win.graph(width=4.875,height=3,pointsize=8)
+  #forecast::Acf(ts,lags, ci.type='ma', xlab = "", main="")
+  acf(ts,lags, ci.type='ma', xlab = "", main="")
+  #win.graph(width=4.875,height=3,pointsize=8)
+  forecast::Pacf(ts,lags, main = "")
+  par(mfrow=c(1,1))
+}
+
+setwd('/Users/Cristhian/Documents/Metro/case_study/')
+path = '/Users/Cristhian/Documents/Metro/case_study/'
+
+data_metro <- read.csv(file= paste(path,"data.csv", sep = ""),
+                         header = TRUE, 
+                         sep=",")
+
+distinct(data_metro,calendar_date)
+data_metro$calendar_date <- lubridate::mdy(data_metro$calendar_date)
+```
+
+## Contents
+
+- EDA 
+- Variables
+- Model
+- Results
+- Conclusion
+
+
+## EDA 
+output variable: volume_sold
+```{r, include=FALSE}
+data_metro <- as.tbl(data_metro)
+
+data_metro_eda <- data_metro %>%
+  group_by(calendar_date, product_id) %>%
+  summarise(volume_sold = sum(volume_sold),
+            revenue = sum(revenue),
+            cost = sum(cost),
+            stock_level = sum(stock_level),
+            retail_price = sum(retail_price),
+            mpdm1 = sum(mpdm1)) %>%
+  arrange(product_id,as.Date(calendar_date))
+
+p1 <- ggplot(data = data_metro_eda)+
+  geom_line(aes(x = as.Date(calendar_date), y=volume_sold, colour = as.character(product_id)))+
+  labs(colour = "Product id")+
+  xlab("Date")+
+  ylab("Number of units")+
+  theme_minimal()
+
+```
+
+
+
+```{r}
+ggplotly(p1) 
+
+```
+
+## EDA 
+
+```{r, include=FALSE}
+p1 <- ggplot(data = data_metro_eda)+
+  geom_boxplot(aes(x=as.character(product_id), y=volume_sold))+
+  labs(colour = "Product id")+
+  xlab("Product id")+
+  ylab("Number of units")+
+  theme_minimal()
+```
+```{r}
+ggplotly(p1)
+
+```
+```{r, include=FALSE}
+
+mpdi <- mean(
+  filter(data_metro_eda, product_id == 158105)$volume_sold
+)
+ 
+data_metro_eda <- data_metro_eda %>%
+  mutate(
+    volume_sold = dplyr::if_else(product_id == 158105 & volume_sold == 4909,
+                                       mpdi,
+                                       as.double(volume_sold)
+                                       )
+    ) %>%
+  mutate(volume_sold= dplyr::if_else(volume_sold<0,0,as.double(volume_sold))
+         )
+
+p1 <- ggplot(data = data_metro_eda)+
+  geom_boxplot(aes(x=as.character(product_id), y=volume_sold))+
+  labs(colour = "Product id")+
+  xlab("Product id")+
+  ylab("Number of units")+
+  theme_minimal()
+
+```
+
+## EDA
+After modifications of variable volume_sold
+
+```{r}
+
+pseries <- ggplot(data = data_metro_eda)+
+  geom_line(aes(x = as.Date(calendar_date), y=volume_sold, colour = as.character(product_id)))+
+  labs(colour = "Product id")+
+  xlab("Date")+
+  ylab("Number of units")+
+  theme_minimal()
+
+cowplot::plot_grid(p1, pseries, nrow=2)
+
+#modified volume_sold variable, no peaks and no values under 0
+```
+
+
+##EDA
+
+```{r, include=FALSE}
+totalVolumeSold <- sum(data_metro_eda$volume_sold)
+data_metro_tbl <- data_metro_eda %>%
+  ungroup() %>%
+  group_by(product_id) %>%
+  summarise(pct_volume = round(100 * sum(volume_sold)/totalVolumeSold, 2) )
+  
+```
+Let's consider that one product makes more than 70% of the total amount of volume, as well as the different shape of its time series.
+
+```{r}
+
+knitr::kable(data_metro_tbl,format = "html" ,padding = 0)%>%
+  kable_styling(position="center", full_width = FALSE, bootstrap_options = "striped")
+```
+
+##Variables
+
+- volume_sold: outcome variable
+- revenue: depends on volume sold
+- cost: depends on volume sold
+- stock_level: consider in the model
+- retail_price: consider in the model
+- mpdm1: consider in the model
+
+
+The model was built considering the direct effects on sales (volume sold) of a set of variables.
+
+##Variables
+```{r, include=FALSE}
+
+data_metro_pid <- data_metro_eda %>%
+  ungroup() %>%
+  filter(product_id==13701) %>%
+  mutate(stock_levelLag  = dplyr::lag(stock_level, default = mean(stock_level)),
+         retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price))) %>%
+  select(calendar_date, volume_sold, stock_levelLag)
+
+data_metro_pid <- reshape2::melt(data_metro_pid, id = "calendar_date")
+
+p1 <- ggplot(data = data_metro_pid)+
+  geom_line(aes(x = as.Date(calendar_date), y=value, colour = variable))+
+  labs(colour = "Variable")+
+  xlab("Date")+
+  ylab("Units")+
+  theme_minimal()
+
+data_metro_pid <- data_metro_eda %>%
+  ungroup() %>%
+  filter(product_id==13701) %>%
+  mutate(stock_levelLag  = dplyr::lag(stock_level, default = mean(stock_level)),
+         retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price))) %>%
+  select(calendar_date,retail_priceLag, mpdm1)
+
+data_metro_pid <- reshape2::melt(data_metro_pid, id = "calendar_date")
+
+p2 <- ggplot(data = data_metro_pid)+
+  geom_line(aes(x = as.Date(calendar_date), y=value, colour = variable))+
+  labs(colour = "Variable")+
+  xlab("Date")+
+  ylab("Units")+
+  theme_minimal()
+
+```
+```{r}
+
+data_metro_pid <- data_metro_eda %>%
+  ungroup() %>%
+  filter(product_id==13701) %>%
+  mutate(retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price)),
+         mpdm1D = lag(mpdm1),
+         mpdm1FixedLag = dplyr::if_else(mpdm1 == 0 , mpdm1D, mpdm1 ),
+         retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price)),
+         stock_levelLag = dplyr::lag(stock_level, default = mean(stock_level)),
+         priceLag = dplyr::if_else(mpdm1FixedLag<retail_priceLag,retail_priceLag,mpdm1FixedLag))%>%
+  select(calendar_date, priceLag)
+p3 <- ggplot(data = data_metro_pid)+
+  geom_line(aes(x = as.Date(calendar_date), y=priceLag), group = 1)+
+  xlab("Date")+
+  ylab("Units")+
+  theme_minimal()
+
+
+cowplot::plot_grid((p1), (p2), p3, nrow = 3)
+
+
+```
+
+
