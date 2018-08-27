@@ -1,6 +1,6 @@
 ---
 title: "Metro - Case Study"
-author: "Cristhian Jim??nez"
+author: "Cristhian Jimenez"
 date: "8/24/2018"
 output: ioslides_presentation
 incremental: true
@@ -36,15 +36,34 @@ TSAnalysis <- function(ts, lags=20){
   forecast::Pacf(ts,lags, main = "")
   par(mfrow=c(1,1))
 }
-
-setwd('/Users/Cristhian/Documents/Metro/case_study/')
-path = '/Users/Cristhian/Documents/Metro/case_study/'
+plotgg <- function(ser1, ser2){
+  n1 = names(ser1)
+  print(n1)
+  n2 = names(ser1)
+  plotfun <- as.data.frame(
+    cbind(ts = seq(1, length(ser1), by =1 ),
+          orig = ser1,
+          fore = ser2))
+  plotfun <- reshape2::melt(plotfun, id="ts")
+  p <- ggplot2::ggplot(data = plotfun,
+              aes(x = ts, 
+                  y = value, 
+                  colour = variable )) +
+    geom_line()+
+    xlab('Time')+
+    ylab('Value')+
+    theme_minimal()
+  
+  plotly::ggplotly(p)
+}
+setwd('C:/Users/a688291/Downloads/Personal/')
+path = 'C:/Users/a688291/Downloads/Personal/'
 
 data_metro <- read.csv(file= paste(path,"data.csv", sep = ""),
                          header = TRUE, 
                          sep=",")
 
-distinct(data_metro,calendar_date)
+
 data_metro$calendar_date <- lubridate::mdy(data_metro$calendar_date)
 ```
 
@@ -63,14 +82,27 @@ output variable: volume_sold
 data_metro <- as.tbl(data_metro)
 
 data_metro_eda <- data_metro %>%
-  group_by(calendar_date, product_id) %>%
-  summarise(volume_sold = sum(volume_sold),
-            revenue = sum(revenue),
-            cost = sum(cost),
-            stock_level = sum(stock_level),
-            retail_price = sum(retail_price),
-            mpdm1 = sum(mpdm1)) %>%
+  select(calendar_date, 
+         product_id,
+         volume_sold,
+         revenue,
+         cost,
+         stock_level,
+         retail_price,
+         mpdm1,
+         woy) %>%
   arrange(product_id,as.Date(calendar_date))
+
+
+# data_metro_eda <- data_metro %>%
+#   group_by(calendar_date, product_id) %>%
+#   summarise(volume_sold = sum(volume_sold),
+#             revenue = sum(revenue),
+#             cost = sum(cost),
+#             stock_level = sum(stock_level),
+#             retail_price = sum(retail_price),
+#             mpdm1 = sum(mpdm1)) %>%
+#   arrange(product_id,as.Date(calendar_date))
 
 p1 <- ggplot(data = data_metro_eda)+
   geom_line(aes(x = as.Date(calendar_date), y=volume_sold, colour = as.character(product_id)))+
@@ -119,7 +151,7 @@ data_metro_eda <- data_metro_eda %>%
          )
 
 p1 <- ggplot(data = data_metro_eda)+
-  geom_boxplot(aes(x=as.character(product_id), y=volume_sold))+
+  geom_boxplot(aes(x=as.character(product_id), y=as.double(volume_sold), colour= as.character(product_id)))+
   labs(colour = "Product id")+
   xlab("Product id")+
   ylab("Number of units")+
@@ -185,7 +217,7 @@ data_metro_pid <- data_metro_eda %>%
          retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price))) %>%
   select(calendar_date, volume_sold, stock_levelLag)
 
-data_metro_pid <- reshape2::melt(data_metro_pid, id = "calendar_date")
+data_metro_pid <- reshape2::melt(as.data.frame(data_metro_pid), id = "calendar_date")
 
 p1 <- ggplot(data = data_metro_pid)+
   geom_line(aes(x = as.Date(calendar_date), y=value, colour = variable))+
@@ -201,7 +233,7 @@ data_metro_pid <- data_metro_eda %>%
          retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price))) %>%
   select(calendar_date,retail_priceLag, mpdm1)
 
-data_metro_pid <- reshape2::melt(data_metro_pid, id = "calendar_date")
+data_metro_pid <- reshape2::melt(as.data.frame(data_metro_pid), id = "calendar_date")
 
 p2 <- ggplot(data = data_metro_pid)+
   geom_line(aes(x = as.Date(calendar_date), y=value, colour = variable))+
@@ -223,8 +255,9 @@ data_metro_pid <- data_metro_eda %>%
          stock_levelLag = dplyr::lag(stock_level, default = mean(stock_level)),
          priceLag = dplyr::if_else(mpdm1FixedLag<retail_priceLag,retail_priceLag,mpdm1FixedLag))%>%
   select(calendar_date, priceLag)
+
 p3 <- ggplot(data = data_metro_pid)+
-  geom_line(aes(x = as.Date(calendar_date), y=priceLag), group = 1)+
+  geom_line(aes(x = as.Date(calendar_date), y=priceLag), group = 1 , colour="tomato1")+
   xlab("Date")+
   ylab("Units")+
   theme_minimal()
@@ -235,4 +268,336 @@ cowplot::plot_grid((p1), (p2), p3, nrow = 3)
 
 ```
 
+##Model
+-Weekly aggregation with lags for stock and price variables.
+
+```{r}
+data_metro_pid <-  data_metro_eda %>%
+  ungroup() %>%
+  filter(product_id==13701) %>%
+  mutate(retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price)),
+         mpdm1D = lag(mpdm1),
+         mpdm1FixedLag = dplyr::if_else(mpdm1 == 0 , mpdm1D, mpdm1 ),
+         retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price)),
+         stock_levelLag = dplyr::lag(stock_level, default = mean(stock_level)),
+         priceLag = dplyr::if_else(mpdm1FixedLag<retail_priceLag,retail_priceLag,mpdm1FixedLag))
+
+data_metro_pid <- data_metro_pid %>%
+  group_by(woy) %>%
+  summarise(volume_sold = sum(volume_sold),
+            priceLag = sum(priceLag)/n(),
+            stock_levelLag = sum(stock_levelLag)
+            )%>%
+  filter(woy<48)
+
+p<- ggplot(data_metro_pid)+
+  geom_line(aes(x=woy,y=volume_sold, colour="VolumeSold"), group=1)+
+  geom_line(aes(x=woy,y=stock_levelLag, colour="StockLevelLag"), group=1)+
+  geom_line(aes(x=woy,y=124*priceLag-1352, colour="priceLag"), group=1)+
+  scale_colour_manual("", 
+                      breaks = c("VolumeSold", "StockLevelLag", "priceLag"),
+                      values = c("tomato1", "royalblue1", "orange2")) +
+  xlab("week of year")+
+  ylab("units")+
+  theme_minimal()
+ggplotly(p)
+
+```
+
+##Model
+Linear regression with ARIMA errors for product id 13701
+
+```{r}
+ser.model      <- data_metro_pid$volume_sold
+ser.price      <- data_metro_pid$priceLag
+ser.stock      <- data_metro_pid$stock_levelLag
+
+
+exo.vars <- data.frame(
+  cbind(price    = log(ifelse(ser.price<0, 0, ser.price)+1),
+        stock    = log(ifelse(ser.stock<0, 0, ser.stock)+1)
+  )
+)
+
+model.exo13701 <- forecast::Arima(
+  log(ser.model+1),
+  order = c(6,0,0),
+  xreg = exo.vars,
+  include.drift = FALSE)
+
+##########################################################################################
+##########################################################################################
+
+
+data_metro_pid <-  data_metro_eda %>%
+  ungroup() %>%
+  filter(product_id==26104) %>%
+  mutate(retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price)),
+         mpdm1D = lag(mpdm1),
+         mpdm1FixedLag = dplyr::if_else(mpdm1 == 0 , mpdm1D, mpdm1 ),
+         retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price)),
+         stock_levelLag = dplyr::lag(stock_level, default = mean(stock_level)),
+         priceLag = dplyr::if_else(mpdm1FixedLag<retail_priceLag,retail_priceLag,mpdm1FixedLag))
+
+data_metro_pid <- data_metro_pid %>%
+  group_by(woy) %>%
+  summarise(volume_sold = sum(volume_sold),
+            priceLag = sum(priceLag)/n(),
+            stock_levelLag = sum(stock_levelLag)
+            )%>%
+  filter(woy<48)
+
+# p<- ggplot(data_metro_pid)+
+#   geom_line(aes(x=woy,y=volume_sold, colour="VolumeSold"), group=1)+
+#   geom_line(aes(x=woy,y=stock_levelLag, colour="StockLevelLag"), group=1)+
+#   geom_line(aes(x=woy,y=124*priceLag-1352, colour="priceLag"), group=1)+
+#   scale_colour_manual("", 
+#                       breaks = c("VolumeSold", "StockLevelLag", "priceLag"),
+#                       values = c("tomato1", "royalblue1", "orange2")) +
+#   xlab("week of year")+
+#   ylab("units")+
+#   theme_minimal()
+# ggplotly(p)
+
+ser.model      <- data_metro_pid$volume_sold
+ser.price      <- data_metro_pid$priceLag
+ser.stock      <- data_metro_pid$stock_levelLag
+
+
+exo.vars <- data.frame(
+  cbind(price    = log(ifelse(ser.price<0, 0, ser.price)+1),
+        stock    = log(ifelse(ser.stock<0, 0, ser.stock)+1)
+  )
+)
+
+model.exo26104 <- forecast::Arima(
+  log(ser.model+1),
+  order = c(1,0,0),
+  xreg = exo.vars,
+  include.drift = FALSE)
+
+##########################################################################################
+##########################################################################################
+
+
+data_metro_pid <-  data_metro_eda %>%
+  ungroup() %>%
+  filter(product_id==158105) %>%
+  mutate(retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price)),
+         mpdm1D = lag(mpdm1),
+         mpdm1FixedLag = dplyr::if_else(mpdm1 == 0 , mpdm1D, mpdm1 ),
+         retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price)),
+         stock_levelLag = dplyr::lag(stock_level, default = mean(stock_level)),
+         priceLag = dplyr::if_else(mpdm1FixedLag<retail_priceLag,retail_priceLag,mpdm1FixedLag))
+
+data_metro_pid <- data_metro_pid %>%
+  group_by(woy) %>%
+  summarise(volume_sold = sum(volume_sold),
+            priceLag = sum(priceLag)/n(),
+            stock_levelLag = sum(stock_levelLag)
+            )%>%
+  filter(woy<48)
+
+# p<- ggplot(data_metro_pid)+
+#   geom_line(aes(x=woy,y=volume_sold, colour="VolumeSold"), group=1)+
+#   geom_line(aes(x=woy,y=stock_levelLag, colour="StockLevelLag"), group=1)+
+#   geom_line(aes(x=woy,y=124*priceLag-1352, colour="priceLag"), group=1)+
+#   scale_colour_manual("", 
+#                       breaks = c("VolumeSold", "StockLevelLag", "priceLag"),
+#                       values = c("tomato1", "royalblue1", "orange2")) +
+#   xlab("week of year")+
+#   ylab("units")+
+#   theme_minimal()
+# ggplotly(p)
+
+ser.model      <- data_metro_pid$volume_sold
+ser.price      <- data_metro_pid$priceLag
+ser.stock      <- data_metro_pid$stock_levelLag
+
+
+exo.vars <- data.frame(
+  cbind(price    = log(ifelse(ser.price<0, 0, ser.price)+1),
+        stock    = log(ifelse(ser.stock<0, 0, ser.stock)+1)
+  )
+)
+
+model.exo158105 <- forecast::Arima(
+  log(ser.model+1),
+  order = c(1,0,0),
+  xreg = exo.vars,
+  include.drift = FALSE)
+
+##########################################################################################
+##########################################################################################
+
+
+data_metro_pid <-  data_metro_eda %>%
+  ungroup() %>%
+  filter(product_id==158737) %>%
+  mutate(retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price)),
+         mpdm1D = lag(mpdm1),
+         mpdm1FixedLag = dplyr::if_else(mpdm1 == 0 , mpdm1D, mpdm1 ),
+         retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price)),
+         stock_levelLag = dplyr::lag(stock_level, default = mean(stock_level)),
+         priceLag = dplyr::if_else(mpdm1FixedLag<retail_priceLag,retail_priceLag,mpdm1FixedLag))
+
+data_metro_pid <- data_metro_pid %>%
+  group_by(woy) %>%
+  summarise(volume_sold = sum(volume_sold),
+            priceLag = sum(priceLag)/n(),
+            stock_levelLag = sum(stock_levelLag)
+            )%>%
+  filter(woy<48)
+
+# p<- ggplot(data_metro_pid)+
+#   geom_line(aes(x=woy,y=volume_sold, colour="VolumeSold"), group=1)+
+#   geom_line(aes(x=woy,y=stock_levelLag, colour="StockLevelLag"), group=1)+
+#   geom_line(aes(x=woy,y=124*priceLag-1352, colour="priceLag"), group=1)+
+#   scale_colour_manual("",
+#                       breaks = c("VolumeSold", "StockLevelLag", "priceLag"),
+#                       values = c("tomato1", "royalblue1", "orange2")) +
+#   xlab("week of year")+
+#   ylab("units")+
+#   theme_minimal()
+# ggplotly(p)
+
+ser.model      <- data_metro_pid$volume_sold
+ser.price      <- data_metro_pid$priceLag
+ser.stock      <- data_metro_pid$stock_levelLag
+
+
+exo.vars <- data.frame(
+  cbind(price    = log(ifelse(ser.price<0, 0, ser.price)+1),
+        stock    = log(ifelse(ser.stock<0, 0, ser.stock)+1)
+  )
+)
+
+model.exo158737 <- forecast::Arima(
+  log(ser.model+1),
+  order = c(1,1,0),
+  xreg = exo.vars,
+  include.drift = FALSE)
+
+(model.exo13701)
+
+
+
+```
+##Model
+Linear regression with ARIMA errors for product id 26104
+```{r}
+(model.exo26104)
+# (model.exo158105)
+# (model.exo158737)
+```
+
+##Model
+Linear regression with ARIMA errors for product id 158105
+```{r}
+# (model.exo26104)
+(model.exo158105)
+# (model.exo158737)
+```
+
+##Model
+Linear regression with ARIMA errors for product id 158737
+```{r}
+# (model.exo26104)
+# (model.exo158105)
+(model.exo158737)
+```
+
+##Forecast and results
+Results for product id 13701
+```{r}
+# (model.exo13701)
+# (model.exo26104)
+# (model.exo158105)
+# (model.exo158737)
+
+data_metro_pid <-  data_metro_eda %>%
+  ungroup() %>%
+  filter(product_id==13701) %>%
+  mutate(retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price)),
+         mpdm1D = lag(mpdm1),
+         mpdm1FixedLag = dplyr::if_else(mpdm1 == 0 , mpdm1D, mpdm1 ),
+         retail_priceLag = dplyr::lag(retail_price, default = mean(retail_price)),
+         stock_levelLag = dplyr::lag(stock_level, default = mean(stock_level)),
+         priceLag = dplyr::if_else(mpdm1FixedLag<retail_priceLag,retail_priceLag,mpdm1FixedLag))
+
+data_metro_pid <- data_metro_pid %>%
+  group_by(woy) %>%
+  summarise(volume_sold = sum(volume_sold),
+            priceLag = sum(priceLag)/n(),
+            stock_levelLag = sum(stock_levelLag)
+            )%>%
+  filter(woy<48)
+
+
+ser.model      <- data_metro_pid$volume_sold
+ser.price      <- data_metro_pid$priceLag
+ser.stock      <- data_metro_pid$stock_levelLag
+
+
+exo.vars <- data.frame(
+  cbind(price    = log(ifelse(ser.price<0, 0, ser.price)+1),
+        stock    = log(ifelse(ser.stock<0, 0, ser.stock)+1)
+  )
+)
+
+ser.for <- forecast::forecast(model.exo13701, xreg = exo.vars[43:47,])
+summary(model.exo13701)
+
+```
+
+
+
+##Results
+
+Fit for product id 13701
+```{r}
+ori = exp(as.double(ser.for$x))-1
+fore = exp(as.double(ser.for$fitted))-1
+
+
+plotfun <- as.data.frame(
+    cbind(ts = seq(1, length(ori), by =1 ),
+          orig = ori,
+          fore = fore))
+  plotfun <- reshape2::melt(plotfun, id="ts")
+  p <- ggplot2::ggplot(data = plotfun,
+              aes(x = ts, 
+                  y = value, 
+                  colour = variable )) +
+    geom_line()+
+    xlab('Time')+
+    ylab('Volume sold')+
+    theme_minimal()
+plotly::ggplotly(p)
+```
+
+##Results
+A look into the residuals
+```{r}
+ori = exp(as.double(ser.for$x))-1
+fore = exp(as.double(ser.for$fitted))-1
+res = ori-fore
+
+
+plotfun <- as.data.frame(
+    cbind(ts = seq(1, length(ori), by =1 ),
+          orig = ori,
+          fore = fore,
+          res = res))
+p<-ggplot(plotfun)+
+  geom_line(aes(x=ts,y=orig, colour="Original" ), group =1)+
+  geom_line(aes(x=ts,y=fore, colour="Forecast" ), group =1)+
+  geom_bar(aes(x=ts,y = res, colour="Residuals"), stat="identity", group=1)+
+  scale_colour_manual("", 
+                      breaks = c("Original", "Forecast", "Residuals"),
+                      values = c("tomato1", "royalblue1", "gray80"))
+
+
+plotly::ggplotly(p)
+```
 

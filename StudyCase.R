@@ -53,8 +53,8 @@ plotgg <- function(ser1, ser2){
   n2 = names(ser1)
   plotfun <- as.data.frame(
     cbind(ts = seq(1, length(ser1), by =1 ),
-          ser1,
-          ser2))
+          orig = ser1,
+          fore = ser2))
   plotfun <- reshape2::melt(plotfun, id="ts")
   p <- ggplot2::ggplot(data = plotfun,
               aes(x = ts, 
