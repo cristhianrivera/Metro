@@ -144,9 +144,15 @@ history <- model %>% fit(
   validation_data = list(x_test, y_test),
   shuffle = TRUE)
 
-plot(history)
 
 
+predicted_output <- model %>% 
+  predict(x_test, batch_size = batch_size)
+dim(y_test)
+dim(predicted_output)
+
+plot(y_test[1,], type = 'l')
+lines(predicted_output[1,])
 
 
 
